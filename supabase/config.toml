@@ -1,0 +1,2 @@
+[functions.risk-scorer]
+verify_jwt = true
