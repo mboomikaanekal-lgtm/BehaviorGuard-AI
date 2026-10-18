@@ -21,6 +21,7 @@ from app.schemas import (
     RiskScoreResponse,
 )
 
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -29,11 +30,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Allow requests from the local frontend and deployed Render frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://behaviorguard-frontend.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -43,10 +46,10 @@ app.add_middleware(
 password_hash = PasswordHash.recommended()
 bearer_scheme = HTTPBearer()
 
-SECRET_KEY = os.environ.get(
-    "BEHAVIORGUARD_SECRET_KEY",
-    "local-development-only-change-this-secret",
-)
+SECRET_KEY = os.environ.get("BEHAVIORGUARD_SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = "local-development-only-change-this-secret"
+
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
 
@@ -85,6 +88,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = create_access_token(user.id)
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -106,6 +110,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
 
     token = create_access_token(user.id)
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -117,6 +122,7 @@ def create_access_token(user_id: int) -> str:
     expires = datetime.now(timezone.utc) + timedelta(
         minutes=TOKEN_EXPIRE_MINUTES
     )
+
     return jwt.encode(
         {"sub": str(user_id), "exp": expires},
         SECRET_KEY,
@@ -143,10 +149,12 @@ def get_current_user(
         )
 
     user = db.query(User).filter(User.id == user_id).first()
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User no longer exists",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return user
@@ -165,6 +173,8 @@ def score_risk(
 ):
     started = time.perf_counter()
 
+    # Reject a previously submitted behavioral window.
+    # This assumes window_key is unique and safely formatted.
     existing = (
         db.query(RiskEvent)
         .filter(
@@ -229,9 +239,7 @@ def score_risk(
         )
         reasons.append("Insufficient behavioral events")
 
-    trust_score = round(
-        max(0.0, min(100.0, 100.0 - risk)), 1
-    )
+    trust_score = round(max(0.0, min(100.0, 100.0 - risk)), 1)
 
     if trust_score < 40:
         risk_level = "HIGH"
@@ -241,9 +249,7 @@ def score_risk(
         risk_level = "LOW"
 
     if not reasons:
-        reasons.append(
-            "No major anomalies detected by demo rules"
-        )
+        reasons.append("No major anomalies detected by demo rules")
 
     confidence = 0.5 if features.event_count >= 5 else 0.2
     latency_ms = (time.perf_counter() - started) * 1000
@@ -260,6 +266,7 @@ def score_risk(
         latency_ms=latency_ms,
         simulated=payload.simulated,
     )
+
     db.add(event)
 
     session = (
