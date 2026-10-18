@@ -165,8 +165,6 @@ def score_risk(
 ):
     started = time.perf_counter()
 
-    # Demo replay protection: reject an already recorded window key.
-    # The window key is currently stored inside the event reason.
     existing = (
         db.query(RiskEvent)
         .filter(
@@ -182,24 +180,20 @@ def score_risk(
         return RiskScoreResponse(
             trust_score=existing.trust_score,
             risk_level=existing.risk_level,
-            confidence=0.0,
+            confidence=existing.confidence,
             reasons=["This behavioral window was already submitted."],
             latency_ms=(time.perf_counter() - started) * 1000,
             cold_start=False,
-            simulated=payload.simulated,
+            simulated=existing.simulated,
             session_status="ACTIVE",
             replay_rejected=True,
             error="Duplicate window key",
         )
 
     features = payload.features
-
-    # Smooth demo scoring.
-    # This is a heuristic, not a trained or validated ML model.
     risk = 0.0
     reasons = []
 
-    # Navigation deviation: expected range 0 to 1.
     if features.nav_flow_deviation > 0.7:
         risk += min(
             30.0,
@@ -207,7 +201,6 @@ def score_risk(
         )
         reasons.append("Navigation pattern differs from baseline")
 
-    # Mouse movement variability.
     if features.mouse_speed_std > 200:
         risk += min(
             20.0,
@@ -215,7 +208,6 @@ def score_risk(
         )
         reasons.append("Mouse movement is unusually inconsistent")
 
-    # Keystroke timing variability.
     if features.keystroke_timing_std > 100:
         risk += min(
             20.0,
@@ -223,7 +215,6 @@ def score_risk(
         )
         reasons.append("Keystroke timing is unusually inconsistent")
 
-    # Long idle periods.
     if features.idle_ratio > 0.5:
         risk += min(
             15.0,
@@ -231,7 +222,6 @@ def score_risk(
         )
         reasons.append("High idle ratio detected")
 
-    # Insufficient events to assess behavior confidently.
     if features.event_count < 20:
         risk += min(
             15.0,
@@ -239,7 +229,9 @@ def score_risk(
         )
         reasons.append("Insufficient behavioral events")
 
-    trust_score = round(max(0.0, min(100.0, 100.0 - risk)), 1)
+    trust_score = round(
+        max(0.0, min(100.0, 100.0 - risk)), 1
+    )
 
     if trust_score < 40:
         risk_level = "HIGH"
@@ -250,8 +242,11 @@ def score_risk(
 
     if not reasons:
         reasons.append(
-            "No major anomalies detected by the demo rules"
+            "No major anomalies detected by demo rules"
         )
+
+    confidence = 0.5 if features.event_count >= 5 else 0.2
+    latency_ms = (time.perf_counter() - started) * 1000
 
     event = RiskEvent(
         user_id=user.id,
@@ -261,6 +256,9 @@ def score_risk(
             f"window:{payload.window_key} | "
             + "; ".join(reasons)
         ),
+        confidence=confidence,
+        latency_ms=latency_ms,
+        simulated=payload.simulated,
     )
     db.add(event)
 
@@ -281,24 +279,56 @@ def score_risk(
         db.add(session)
 
     session.last_score = trust_score
-
-    # Demo only: do not revoke authentication automatically.
     db.commit()
 
     return RiskScoreResponse(
         trust_score=trust_score,
         risk_level=risk_level,
-        confidence=(
-            0.5 if features.event_count >= 5 else 0.2
-        ),
+        confidence=confidence,
         reasons=reasons,
-        latency_ms=(time.perf_counter() - started) * 1000,
+        latency_ms=latency_ms,
         cold_start=False,
         simulated=payload.simulated,
         session_status=session.status,
         replay_rejected=False,
         error=None,
     )
+
+
+@app.post("/api/risk/reset")
+def reset_demo(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        db.query(RiskEvent).filter(
+            RiskEvent.user_id == user.id
+        ).delete(synchronize_session=False)
+
+        sessions = (
+            db.query(UserSession)
+            .filter(UserSession.user_id == user.id)
+            .all()
+        )
+
+        for session in sessions:
+            session.status = "ACTIVE"
+            session.last_score = 100.0
+
+        db.commit()
+
+        return {
+            "message": "Demo data reset successfully",
+            "trust_score": 100.0,
+            "session_status": "ACTIVE",
+        }
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset demo data",
+        )
 
 
 @app.get("/api/risk/events")
@@ -320,6 +350,9 @@ def get_risk_events(
             "trust_score": event.trust_score,
             "risk_level": event.risk_level,
             "reason": event.reason,
+            "confidence": event.confidence,
+            "latency_ms": event.latency_ms,
+            "simulated": event.simulated,
             "created_at": event.created_at.isoformat(),
         }
         for event in events

@@ -1,67 +1,113 @@
-import { supabase } from "@/lib/supabase";
+
+import { apiRequest } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth-context";
 import type { RiskEventRow, SessionRow } from "@/lib/types";
 
-export async function fetchSession(userId: string): Promise<SessionRow | null> {
-  const { data, error } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data as SessionRow | null;
+interface BackendRiskEvent {
+  id: number;
+  trust_score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH";
+  reason: string;
+  confidence: number;
+  latency_ms: number;
+  simulated: boolean;
+  created_at: string;
 }
 
-export async function fetchRiskEvents(userId: string, limit = 50): Promise<RiskEventRow[]> {
-  const { data, error } = await supabase
-    .from("risk_events")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as RiskEventRow[];
+function getToken(): string {
+  const token = getAccessToken();
+
+  if (!token) {
+    throw new Error("Please sign in again.");
+  }
+
+  return token;
 }
 
-export async function fetchWindowCount(userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from("behavior_windows")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId);
-  if (error) throw new Error(error.message);
-  return count ?? 0;
+function mapEvent(event: BackendRiskEvent): RiskEventRow {
+  const reasonParts = event.reason.split(" | ");
+  const reasonText =
+    reasonParts.length > 1
+      ? reasonParts.slice(1).join(" | ")
+      : event.reason;
+
+  return {
+    id: String(event.id),
+    user_id: "",
+    window_id: null,
+    trust_score: event.trust_score,
+    risk_level: event.risk_level,
+    confidence: event.confidence,
+    reasons: reasonText
+      .split(";")
+      .map((reason) => reason.trim())
+      .filter(Boolean),
+    latency_ms: event.latency_ms,
+    simulated: event.simulated,
+    created_at: event.created_at,
+  };
 }
 
-export async function fetchRecentAlerts(userId: string, limit = 5): Promise<RiskEventRow[]> {
-  const { data, error } = await supabase
-    .from("risk_events")
-    .select("*")
-    .eq("user_id", userId)
-    .in("risk_level", ["MEDIUM", "HIGH"])
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as RiskEventRow[];
+async function loadEvents(): Promise<BackendRiskEvent[]> {
+  return apiRequest<BackendRiskEvent[]>(
+    "/api/risk/events",
+    {},
+    getToken()
+  );
 }
 
-// Reset only the current demo user's data and session state.
-export async function resetDemoData(userId: string): Promise<void> {
-  const { error: wErr } = await supabase.from("behavior_windows").delete().eq("user_id", userId);
-  if (wErr) throw new Error(wErr.message);
-  const { error: eErr } = await supabase.from("risk_events").delete().eq("user_id", userId);
-  if (eErr) throw new Error(eErr.message);
-  const { error: sErr } = await supabase.from("sessions").delete().eq("user_id", userId);
-  if (sErr) throw new Error(sErr.message);
-  const { error: aErr } = await supabase.from("audit_logs").delete().eq("user_id", userId);
-  if (aErr) throw new Error(aErr.message);
-  const { error: pErr } = await supabase.from("profiles")
-    .update({ baseline: {}, baseline_samples: 0, cold_start: true, last_updated: new Date().toISOString() })
-    .eq("user_id", userId);
-  if (pErr) throw new Error(pErr.message);
+export async function fetchSession(
+  _userId: string
+): Promise<SessionRow | null> {
+  // Session details are not yet fully exposed by the backend.
+  return null;
 }
 
-export async function unlockSession(userId: string): Promise<void> {
-  const { error } = await supabase.from("sessions")
-    .update({ status: "ACTIVE", revoked_at: null, updated_at: new Date().toISOString() })
-    .eq("user_id", userId);
-  if (error) throw new Error(error.message);
+export async function fetchRiskEvents(
+  _userId: string,
+  limit = 50
+): Promise<RiskEventRow[]> {
+  const events = await loadEvents();
+
+  return events.slice(0, limit).map(mapEvent);
+}
+
+export async function fetchWindowCount(
+  _userId: string
+): Promise<number> {
+  const events = await loadEvents();
+
+  return events.length;
+}
+
+export async function fetchRecentAlerts(
+  _userId: string,
+  limit = 5
+): Promise<RiskEventRow[]> {
+  const events = await loadEvents();
+
+  return events
+    .filter(
+      (event) =>
+        event.risk_level === "MEDIUM" ||
+        event.risk_level === "HIGH"
+    )
+    .slice(0, limit)
+    .map(mapEvent);
+}
+
+export async function resetDemoData(
+  _userId: string
+): Promise<void> {
+  throw new Error(
+    "Reset is not available in the local backend yet."
+  );
+}
+
+export async function unlockSession(
+  _userId: string
+): Promise<void> {
+  throw new Error(
+    "Session unlock is not available in the local backend yet."
+  );
 }

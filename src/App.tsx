@@ -1,3 +1,4 @@
+
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { SignIn } from "@/components/SignIn";
 import { Dashboard } from "@/components/Dashboard";
