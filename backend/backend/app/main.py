@@ -22,7 +22,37 @@ from app.schemas import (
 )
 
 # Create database tables
+
+# Create database tables and safely add missing columns
 Base.metadata.create_all(bind=engine)
+
+from sqlalchemy import inspect, text
+
+with engine.begin() as connection:
+    inspector = inspect(connection)
+    table_names = inspector.get_table_names()
+
+    if "risk_events" in table_names:
+        columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("risk_events")
+        }
+
+        if "confidence" not in columns:
+            connection.execute(
+                text("ALTER TABLE risk_events ADD COLUMN confidence FLOAT DEFAULT 0.0")
+            )
+
+        if "latency_ms" not in columns:
+            connection.execute(
+                text("ALTER TABLE risk_events ADD COLUMN latency_ms FLOAT DEFAULT 0.0")
+            )
+
+        if "simulated" not in columns:
+            connection.execute(
+                text("ALTER TABLE risk_events ADD COLUMN simulated BOOLEAN DEFAULT 0")
+            )
+
 
 app = FastAPI(
     title="BehaviorGuard AI API",
