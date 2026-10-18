@@ -1,8 +1,7 @@
-
-import type { ElementType } from "react";
+import type { ReactNode } from "react";
 
 interface StatCardProps {
-  icon: ElementType;
+  icon: ReactNode;
   title: string;
   value: string;
   subtitle: string;
@@ -38,7 +37,7 @@ const accentMap = {
 };
 
 export function StatCard({
-  icon: Icon,
+  icon,
   title,
   value,
   subtitle,
@@ -51,7 +50,7 @@ export function StatCard({
       <div
         className={`w-9 h-9 rounded-lg ${accent.bg} ${accent.border} border flex items-center justify-center mb-3 ${accent.text}`}
       >
-        <Icon className="w-5 h-5" />
+        {icon}
       </div>
 
       <p className="text-xs text-slate-500 mb-0.5">{title}</p>

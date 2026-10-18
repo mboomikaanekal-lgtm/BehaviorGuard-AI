@@ -68,6 +68,7 @@ export async function fetchRiskEvents(
   limit = 50
 ): Promise<RiskEventRow[]> {
   const events = await loadEvents();
+
   return events.slice(0, limit).map(mapEvent);
 }
 
@@ -75,6 +76,7 @@ export async function fetchWindowCount(
   _userId: string
 ): Promise<number> {
   const events = await loadEvents();
+
   return events.length;
 }
 
@@ -97,10 +99,8 @@ export async function fetchRecentAlerts(
 export async function resetDemoData(
   _userId: string
 ): Promise<void> {
-  await apiRequest(
-    "/api/risk/reset",
-    { method: "POST" },
-    getToken()
+  throw new Error(
+    "Reset is not available in the local backend yet."
   );
 }
 
@@ -108,6 +108,6 @@ export async function unlockSession(
   _userId: string
 ): Promise<void> {
   throw new Error(
-    "Session unlock is not available in the backend yet."
+    "Session unlock is not available in the local backend yet."
   );
 }
