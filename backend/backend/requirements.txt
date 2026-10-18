@@ -1,2 +1,5 @@
+fastapi
 uvicorn[standard]
+sqlalchemy
 PyJWT
+pwdlib[argon2]
